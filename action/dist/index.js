@@ -492,32 +492,16 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 const core = __importStar(__webpack_require__(470));
 const childProcess = __importStar(__webpack_require__(129));
-const fs = __importStar(__webpack_require__(747));
-/**
- * writeFileToConsole contents of file to console.
- * @param {string} path - filepath to write to the console
- */
-function writeFileToConsole(path) {
-    try {
-        const data = fs.readFileSync(path, 'utf8');
-        console.log(`${path}: ${data}`);
-    }
-    catch (e) {
-        console.log(`$unable to read {path}, skipping: ${e}`);
-    }
-}
 /**
  * Run a specified command.
  * @param {string} cmd - command to run
  */
 function runCmd(cmd) {
     try {
+        console.log(`RUNNING: "${cmd}"`);
         childProcess.execSync(cmd);
     }
     catch (error) {
-        writeFileToConsole('serverlog_stdout.txt');
-        writeFileToConsole('serverlog_stderr.txt');
-        writeFileToConsole('function_output.json');
         core.setFailed(error.message);
     }
 }
@@ -536,15 +520,17 @@ function run() {
         const startDelay = core.getInput('startDelay');
         const workingDirectory = core.getInput('workingDirectory');
         // Install conformance client binary.
-        let versionTag = '';
+        let branchTag = '';
         if (version) {
-            versionTag = `@${version}`;
+            branchTag = `--branch ${version}`;
         }
-        runCmd(`go get github.com/GoogleCloudPlatform/functions-framework-conformance/client${versionTag} && go install github.com/GoogleCloudPlatform/functions-framework-conformance/client`);
+        // go get with path@version only works within a go module
+        runCmd(`git clone https://github.com/GoogleCloudPlatform/functions-framework-conformance.git ${branchTag}`);
+        runCmd(`cd functions-framework-conformance/client && go build -o ~/client`);
         // Run the client with the specified parameters.
         runCmd([
             !!workingDirectory ? `cd ${workingDirectory} &&` : '',
-            `client`,
+            `~/client`,
             `-output-file=${outputFile}`,
             `-type=${functionType}`,
             `-validate-mapping=${validateMapping}`,
