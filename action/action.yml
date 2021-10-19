@@ -38,5 +38,12 @@ inputs:
     description: 'The subdirectory in which the conformance tests should run'
     default: ""
 runs:
-  using: 'node12'
-  main: 'dist/index.js'
+  using: "composite"
+  steps:
+  - uses: actions/setup-go@v2
+    with:
+      go-version: 1.16
+  - uses: actions/setup-node@v2
+    with:
+      node-version: 14
+  - run: node dist/index.js
