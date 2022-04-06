@@ -1,0 +1,114 @@
+name: Buildpack Integration Test
+description: Tests the integration of Functions Framework and the GCF builders/buildpacks.
+on:
+  workflow_call:
+    inputs:
+      http-builder-source:
+        description: HTTP function source; relative to repo root
+        required: true
+        default: 'testdata/conformance/function'
+      http-builder-target:
+        description: HTTP function target
+        required: true
+        default: 'declarativeHTTP'
+      cloudevent-builder-source:
+        description: CloudEvent function source; relative to root
+        required: true
+        default: 'testdata/conformance/function'
+      cloudevent-builder-target:
+        required: true
+        descirption: CloudEvent function target
+        default: 'declarativeCloudEvent' 
+      builder-runtime:
+        required: true
+        description: GCF runtime (e.g. 'go116')
+        default: 'go116'
+      event-builder-source:
+        description: Background function source; relative to root
+        required: false
+      event-builder-target:
+        required: false
+        description: Background function target
+      builder-tag:
+        required: false
+        description: GCF builder image tag
+        default: 'go116_20220320_1_16_13_RC00'
+      conformance-client-version:
+        required: false
+        description: Conformance test client version
+        default: '4e1952b5395e24ab819242f8fd3ac8b3c62b7870'
+jobs:
+  # Download and cache the Functions Framework conformance test client
+  download-conformance-client:
+    runs-on: ubuntu-latest
+    outputs:
+      # Pass the conformance client version key to the next job
+      # so the client can be retrieved from the Action cache. The env var
+      # is evaluated at the end of this job.
+      cache-key: ${{ steps.set-cached-client-version.outputs.key }}
+    steps:
+      - name: Set conformance test client version from Workflow input
+        run: echo CLIENT_VERSION=${{ github.event.inputs.conformance-client-version }} >> $GITHUB_ENV
+      - name: Get latest conformance test client version
+        if: ${{ github.event.inputs.conformance-client-version == 'latest' }}
+        id: conformance-client-latest
+        uses: anniefu/functions-framework-conformance/.github/actions/conformance-client/resolve-latest
+      - name: Set conformance test client version from latest
+        if: ${{ github.event.inputs.conformance-client-version == 'latest' }}
+        run: echo CLIENT_VERSION=${{ steps.conformance-client-latest.version }} >> $GITHUB_ENV
+      - name: Set cache key for client version
+        id: set-cached-client-version
+        run: echo "::set-output name=key::conformance-client-${{ env.CLIENT_VERSION }}"
+      - name: Check for cached conformance test client
+        id: check-for-cached-client
+        uses: actions/cache@v3
+        with:
+          path: ~/go/bin/client
+          key: ${{ steps.set-cached-client-version.outputs.key }}
+      # Cache miss, need to download convformance test client using Go tooling
+      - name: Download conformance test client
+        if: ${{ steps.check-for-cached-client.outputs.cache-hit != 'true' }}
+        uses: anniefu/functions-framework-conformance/.github/actions/conformance-client/download
+        with:
+          client-version: ${{ env.CLIENT_VERSION }}
+          cache-key: ${{ steps.set-cached-client-version.outputs.key }}
+  run-buildpack-integration-test:
+    needs:
+      - download-conformance-client
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        type: [http, cloudevent, event]
+        include:
+          - type: http
+            builder-source: ${{ github.event.inputs.http-builder-source }}
+            builder-target: ${{ github.event.inputs.http-builder-target }}
+          - type: cloudevent
+            builder-source: ${{ github.event.inputs.cloudevent-builder-source }}
+            builder-target: ${{ github.event.inputs.cloudevent-builder-target }}
+          - type: event
+            builder-source: ${{ github.event.inputs.event-builder-source }}
+            builder-target: ${{ github.event.inputs.event-builder-target }}
+    steps:
+      - name: Retrieve conformance client
+        if: ${{ matrix.builder-source }}
+        uses: actions/cache@v3
+        with:
+          path: ~/go/bin/client
+          key: ${{ needs.download-conformance-client.outputs.cache-key }}
+      - name: Add client to PATH
+        if: ${{ matrix.builder-source }}
+        run: echo "$HOME/go/bin" >> $GITHUB_PATH
+      - name: Check out repository
+        if: ${{ matrix.builder-source }}
+        uses: actions/checkout@v2
+      - name: Buildpack integration test
+        if: ${{ matrix.builder-source }}
+        run: |
+          client \
+          -type=${{ matrix.type }} \
+          -builder-source=${{ matrix.builder-source }} \
+          -builder-target=${{ matrix.builder-target }} \
+          -builder-runtime=${{ github.event.inputs.builder-runtime }} \
+          -builder-tag=${{ github.event.inputs.builder-tag }} \
+          -validate-mapping=false
